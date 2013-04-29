@@ -15,7 +15,7 @@
  *             Milind Dumbare <milind@clusterfs.com>
  *
  *  This file is part of ZFS on Linux.
- *  For details, see <http://github.com/behlendorf/zfs/>.
+ *  For details, see <http://zfsonlinux.org/>.
  *
  *  ZPIOS is free software; you can redistribute it and/or modify it
  *  under the terms of the GNU General Public License as published by the
@@ -33,6 +33,7 @@
 
 #include <sys/zfs_context.h>
 #include <sys/dmu.h>
+#include <sys/dmu_objset.h>
 #include <sys/txg.h>
 #include <linux/cdev.h>
 #include "zpios-internal.h"
@@ -92,7 +93,7 @@ int zpios_upcall(char *path, char *phase, run_args_t *run_args, int rc)
         envp[2] = "PATH=/sbin:/usr/sbin:/bin:/usr/bin";
         envp[3] = NULL;
 
-        return call_usermodehelper(path, argv, envp, 1);
+        return call_usermodehelper(path, argv, envp, UMH_WAIT_PROC);
 }
 
 static uint64_t
@@ -169,7 +170,7 @@ zpios_dmu_setup(run_args_t *run_args)
 	t->start = zpios_timespec_now();
 
 	(void)snprintf(name, 32, "%s/id_%d", run_args->pool, run_args->id);
-	rc = dmu_objset_create(name, DMU_OST_OTHER, 0, NULL, NULL);
+	rc = dmu_objset_create(name, DMU_OST_OTHER, 0, NULL, NULL, NULL);
 	if (rc) {
 		zpios_print(run_args->file, "Error dmu_objset_create(%s, ...) "
 			    "failed: %d\n", name, rc);

@@ -58,7 +58,7 @@ int zfs_mg_alloc_failures;
 /*
  * Metaslab debugging: when set, keeps all space maps in core to verify frees.
  */
-static int metaslab_debug = 0;
+int metaslab_debug = 0;
 
 /*
  * Minimum size which forces the dynamic allocator to change
@@ -1630,6 +1630,7 @@ metaslab_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize, blkptr_t *bp,
 
 	ASSERT(ndvas > 0 && ndvas <= spa_max_replication(spa));
 	ASSERT(BP_GET_NDVAS(bp) == 0);
+    ASSERT(!BP_IS_ENCRYPTED(bp) || ndvas < spa_max_replication(spa));
 	ASSERT(hintbp == NULL || ndvas <= BP_GET_NDVAS(hintbp));
 
 	for (d = 0; d < ndvas; d++) {
@@ -1746,3 +1747,8 @@ void metaslab_fastwrite_unmark(spa_t *spa, const blkptr_t *bp)
 
 	spa_config_exit(spa, SCL_VDEV, FTAG);
 }
+
+#if defined(_KERNEL) && defined(HAVE_SPL)
+module_param(metaslab_debug, int, 0644);
+MODULE_PARM_DESC(metaslab_debug, "keep space maps in core to verify frees");
+#endif /* _KERNEL && HAVE_SPL */

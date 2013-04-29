@@ -20,7 +20,7 @@
  */
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2011 by Delphix. All rights reserved.
+ * Copyright (c) 2012 by Delphix. All rights reserved.
  * Copyright 2011 Nexenta Systems, Inc.  All rights reserved.
  */
 
@@ -94,7 +94,7 @@ struct dsl_pool;
 /*
  * Size of block to hold the configuration data (a packed nvlist)
  */
-#define	SPA_CONFIG_BLOCKSIZE	(1 << 14)
+#define	SPA_CONFIG_BLOCKSIZE	(1ULL << 14)
 
 /*
  * The DVA size encodings for LSIZE and PSIZE support blocks up to 32MB.
@@ -140,7 +140,7 @@ typedef struct zio_cksum {
  *	+-------+-------+-------+-------+-------+-------+-------+-------+
  * 5	|G|			 offset3				|
  *	+-------+-------+-------+-------+-------+-------+-------+-------+
- * 6	|BDX|lvl| type	| cksum | comp	|     PSIZE	|     LSIZE	|
+ * 6	|BDE|lvl| type	| cksum | comp	|     PSIZE	|     LSIZE	|
  *	+-------+-------+-------+-------+-------+-------+-------+-------+
  * 7	|			padding					|
  *	+-------+-------+-------+-------+-------+-------+-------+-------+
@@ -174,13 +174,24 @@ typedef struct zio_cksum {
  * G		gang block indicator
  * B		byteorder (endianness)
  * D		dedup
- * X		unused
+ * E		encryption
  * lvl		level of indirection
  * type		DMU object type
  * phys birth	txg of block allocation; zero if same as logical birth txg
  * log. birth	transaction group in which the block was logically born
  * fill count	number of non-zero blocks under this bp
  * checksum[4]	256-bit checksum of the data this bp describes
+ *
+ * Special notes for encryption:
+ *
+ * A single bit is used to indicate if the block is encrypted.  This is
+ * sufficient since all blocks in a dataset always share the same encryption
+ * algorithm-keylen-mode.
+ *
+ * When encryption is enabled blk_dva[2] holds the IV.
+ * When encryption is enabled level 0 blocks checksum[2] and checksum[3] hold
+ * the MAC output from the encryption and the normal checksum is truncated
+ * and stored in checksum[0] and checksum[1].
  */
 #define	SPA_BLKPTRSHIFT	7		/* blkptr_t is 128 bytes	*/
 #define	SPA_DVAS_PER_BP	3		/* Number of DVAs in a bp	*/
@@ -239,8 +250,9 @@ typedef struct blkptr {
 #define	BP_GET_LEVEL(bp)		BF64_GET((bp)->blk_prop, 56, 5)
 #define	BP_SET_LEVEL(bp, x)		BF64_SET((bp)->blk_prop, 56, 5, x)
 
-#define	BP_GET_PROP_BIT_61(bp)		BF64_GET((bp)->blk_prop, 61, 1)
-#define	BP_SET_PROP_BIT_61(bp, x)	BF64_SET((bp)->blk_prop, 61, 1, x)
+#define BP_GET_CRYPT(bp)                BF64_GET((bp)->blk_prop, 61, 1)
+#define BP_SET_CRYPT(bp, x)             BF64_SET((bp)->blk_prop, 61, 1, x)
+#define BP_IS_ENCRYPTED(bp)             (!!BP_GET_CRYPT(bp))
 
 #define	BP_GET_DEDUP(bp)		BF64_GET((bp)->blk_prop, 62, 1)
 #define	BP_SET_DEDUP(bp, x)		BF64_SET((bp)->blk_prop, 62, 1, x)
@@ -257,23 +269,29 @@ typedef struct blkptr {
 	(bp)->blk_phys_birth = ((logical) == (physical) ? 0 : (physical)); \
 }
 
-#define	BP_GET_ASIZE(bp)	\
-	(DVA_GET_ASIZE(&(bp)->blk_dva[0]) + DVA_GET_ASIZE(&(bp)->blk_dva[1]) + \
-		DVA_GET_ASIZE(&(bp)->blk_dva[2]))
+#define BP_GET_ASIZE(bp)                        \
+        (DVA_GET_ASIZE(&(bp)->blk_dva[0]) +     \
+        DVA_GET_ASIZE(&(bp)->blk_dva[1]) +      \
+        (BP_IS_ENCRYPTED(bp) ? 0 : DVA_GET_ASIZE(&(bp)->blk_dva[2])))
 
 #define	BP_GET_UCSIZE(bp) \
-	((BP_GET_LEVEL(bp) > 0 || dmu_ot[BP_GET_TYPE(bp)].ot_metadata) ? \
+	((BP_GET_LEVEL(bp) > 0 || DMU_OT_IS_METADATA(BP_GET_TYPE(bp))) ? \
 	BP_GET_PSIZE(bp) : BP_GET_LSIZE(bp))
 
-#define	BP_GET_NDVAS(bp)	\
-	(!!DVA_GET_ASIZE(&(bp)->blk_dva[0]) + \
-	!!DVA_GET_ASIZE(&(bp)->blk_dva[1]) + \
-	!!DVA_GET_ASIZE(&(bp)->blk_dva[2]))
+#define BP_GET_NDVAS(bp)                        \
+        (DVA_IS_VALID(&(bp)->blk_dva[0]) +      \
+        DVA_IS_VALID(&(bp)->blk_dva[1]) +       \
+        (BP_IS_ENCRYPTED(bp) ? 0 : DVA_IS_VALID(&(bp)->blk_dva[2])))
 
-#define	BP_COUNT_GANG(bp)	\
-	(DVA_GET_GANG(&(bp)->blk_dva[0]) + \
-	DVA_GET_GANG(&(bp)->blk_dva[1]) + \
-	DVA_GET_GANG(&(bp)->blk_dva[2]))
+#define BP_GET_COPIES(bp)                       \
+        (DVA_VALID_COPIES(&(bp)->blk_dva[0]) +  \
+        DVA_VALID_COPIES(&(bp)->blk_dva[1]) +   \
+        (BP_IS_ENCRYPTED(bp) ? 0 : DVA_VALID_COPIES(&(bp)->blk_dva[2])))
+
+#define BP_COUNT_GANG(bp)                       \
+        (DVA_GET_GANG(&(bp)->blk_dva[0]) +      \
+        DVA_GET_GANG(&(bp)->blk_dva[1]) +       \
+        (BP_IS_ENCRYPTED(bp) ? 0 : DVA_GET_GANG(&(bp)->blk_dva[2])))
 
 #define	DVA_EQUAL(dva1, dva2)	\
 	((dva1)->dva_word[1] == (dva2)->dva_word[1] && \
@@ -292,6 +310,43 @@ typedef struct blkptr {
 	((zc1).zc_word[3] - (zc2).zc_word[3])))
 
 #define	DVA_IS_VALID(dva)	(DVA_GET_ASIZE(dva) != 0)
+
+/*
+ * The Crypto IV lives in blk_dva[2].
+ * Leave 0-31 alone to ensure that ASIZE is always 0 even when we
+ * have an IV in there.  The IV is then in dva_word[0] 32-64 and dva_word[1]
+ */
+#define BP_SET_CRYPT_IV(bp, iv)                                         \
+{                                                                       \
+        BF64_SET((bp)->blk_dva[2].dva_word[0], 0, 31, 0);               \
+        BF64_SET((bp)->blk_dva[2].dva_word[0], 32, 32, BE_32((iv)[0])); \
+        BF64_SET((bp)->blk_dva[2].dva_word[1],  0, 32, BE_32((iv)[1])); \
+        BF64_SET((bp)->blk_dva[2].dva_word[1], 32, 32, BE_32((iv)[2])); \
+}
+
+#define BP_GET_CRYPT_IV(bp, iv)                                         \
+{                                                                       \
+        ASSERT(DVA_GET_ASIZE(&(bp)->blk_dva[2]) == 0);                  \
+        iv[0] = BE_32(BF64_GET((bp)->blk_dva[2].dva_word[0], 32, 32));  \
+        iv[1] = BE_32(BF64_GET((bp)->blk_dva[2].dva_word[1],  0, 32));  \
+        iv[2] = BE_32(BF64_GET((bp)->blk_dva[2].dva_word[1], 32, 32));  \
+        ASSERT(DVA_GET_ASIZE(&(bp)->blk_dva[2]) == 0);                  \
+}
+
+#define BP_SET_CRYPT_MAC(bp, mac)                                       \
+{                                                                       \
+        BF64_SET((bp)->blk_cksum.zc_word[2], 32, 32, BE_32(mac[0]));    \
+        BF64_SET((bp)->blk_cksum.zc_word[3],  0, 32, BE_32(mac[1]));    \
+        BF64_SET((bp)->blk_cksum.zc_word[3], 32, 32, BE_32(mac[2]));    \
+}
+
+#define BP_GET_CRYPT_MAC(bp, mac)               \
+{                                               \
+        mac[0] = BE_32(BF64_GET((bp)->blk_cksum.zc_word[2], 32, 32));   \
+        mac[1] = BE_32(BF64_GET((bp)->blk_cksum.zc_word[3],  0, 32));   \
+        mac[2] = BE_32(BF64_GET((bp)->blk_cksum.zc_word[3], 32, 32));   \
+}
+
 
 #define	ZIO_SET_CHECKSUM(zcp, w0, w1, w2, w3)	\
 {						\
@@ -375,7 +430,7 @@ typedef struct blkptr {
 		    DVA_GET_ASIZE(&bp->blk_dva[1]) / 2)			\
 			copies--;					\
 		len += func(buf + len, size - len,			\
-		    "[L%llu %s] %s %s %s %s %s %s%c"			\
+		    "[L%llu %s] %s %s %s %s %s %s %s%c"			\
 		    "size=%llxL/%llxP birth=%lluL/%lluP fill=%llu%c"	\
 		    "cksum=%llx:%llx:%llx:%llx",			\
 		    (u_longlong_t)BP_GET_LEVEL(bp),			\
@@ -385,6 +440,7 @@ typedef struct blkptr {
 		    BP_GET_BYTEORDER(bp) == 0 ? "BE" : "LE",		\
 		    BP_IS_GANG(bp) ? "gang" : "contiguous",		\
 		    BP_GET_DEDUP(bp) ? "dedup" : "unique",		\
+            BP_GET_CRYPT(bp) ? "encrypted" : "unencrypted",     \
 		    copyname[copies],					\
 		    ws,							\
 		    (u_longlong_t)BP_GET_LSIZE(bp),			\
@@ -404,8 +460,8 @@ typedef struct blkptr {
 #include <sys/dmu.h>
 
 #define	BP_GET_BUFC_TYPE(bp)						\
-	(((BP_GET_LEVEL(bp) > 0) || (dmu_ot[BP_GET_TYPE(bp)].ot_metadata)) ? \
-	ARC_BUFC_METADATA : ARC_BUFC_DATA);
+	(((BP_GET_LEVEL(bp) > 0) || (DMU_OT_IS_METADATA(BP_GET_TYPE(bp)))) ? \
+	ARC_BUFC_METADATA : ARC_BUFC_DATA)
 
 typedef enum spa_import_type {
 	SPA_IMPORT_EXISTING,
@@ -416,10 +472,10 @@ typedef enum spa_import_type {
 extern int spa_open(const char *pool, spa_t **, void *tag);
 extern int spa_open_rewind(const char *pool, spa_t **, void *tag,
     nvlist_t *policy, nvlist_t **config);
-extern int spa_get_stats(const char *pool, nvlist_t **config,
-    char *altroot, size_t buflen);
+extern int spa_get_stats(const char *pool, nvlist_t **config, char *altroot,
+    size_t buflen);
 extern int spa_create(const char *pool, nvlist_t *config, nvlist_t *props,
-    const char *history_str, nvlist_t *zplprops);
+    const char *history_str, struct dsl_crypto_ctx *dcc, nvlist_t *zplprops);
 extern int spa_import_rootpool(char *devpath, char *devid);
 extern int spa_import(const char *pool, nvlist_t *config, nvlist_t *props,
     uint64_t flags);
@@ -574,6 +630,7 @@ extern void spa_claim_notify(zio_t *zio);
 /* Accessor functions */
 extern boolean_t spa_shutting_down(spa_t *spa);
 extern struct dsl_pool *spa_get_dsl(spa_t *spa);
+extern boolean_t spa_is_initializing(spa_t *spa);
 extern blkptr_t *spa_get_rootblkptr(spa_t *spa);
 extern void spa_set_rootblkptr(spa_t *spa, const blkptr_t *bp);
 extern void spa_altroot(spa_t *, char *, size_t);
@@ -605,6 +662,8 @@ extern uint64_t spa_delegation(spa_t *spa);
 extern objset_t *spa_meta_objset(spa_t *spa);
 
 /* Miscellaneous support routines */
+extern void spa_activate_mos_feature(spa_t *spa, const char *feature);
+extern void spa_deactivate_mos_feature(spa_t *spa, const char *feature);
 extern int spa_rename(const char *oldname, const char *newname);
 extern spa_t *spa_by_guid(uint64_t pool_guid, uint64_t device_guid);
 extern boolean_t spa_guid_exists(uint64_t pool_guid, uint64_t device_guid);

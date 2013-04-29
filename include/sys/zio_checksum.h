@@ -39,11 +39,13 @@ typedef void zio_checksum_t(const void *data, uint64_t size, zio_cksum_t *zcp);
 /*
  * Information about each checksum function.
  */
-typedef struct zio_checksum_info {
+typedef const struct zio_checksum_info {
 	zio_checksum_t	*ci_func[2]; /* checksum function for each byteorder */
 	int		ci_correctable;	/* number of correctable bits	*/
 	int		ci_eck;		/* uses zio embedded checksum? */
 	int		ci_dedup;	/* strong enough for dedup? */
+    //     int		ci_trunc;	/* truncated checksum + crypto MAC */
+    // Skipping ci_trunc, since currently only one checksum is supported.
 	char		*ci_name;	/* descriptive name */
 } zio_checksum_info_t;
 
@@ -62,6 +64,7 @@ extern zio_checksum_info_t zio_checksum_table[ZIO_CHECKSUM_FUNCTIONS];
  * Checksum routines.
  */
 extern zio_checksum_t zio_checksum_SHA256;
+extern zio_checksum_t zio_checksum_SHAMAC;
 
 extern void zio_checksum_compute(zio_t *zio, enum zio_checksum checksum,
     void *data, uint64_t size);

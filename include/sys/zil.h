@@ -20,6 +20,7 @@
  */
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012 by Delphix. All rights reserved.
  */
 
 /* Portions Copyright 2010 Robert Milkowski */
@@ -82,11 +83,27 @@ typedef struct zil_header {
  * number passed in the blk_cksum field of the blkptr_t
  */
 typedef struct zil_chain {
-	uint64_t zc_pad;
+    uint64_t zc_mac;
 	blkptr_t zc_next_blk;	/* next block in chain */
 	uint64_t zc_nused;	/* bytes in log block used */
 	zio_eck_t zc_eck;	/* block trailer */
 } zil_chain_t;
+
+#define ZC_GET_CRYPT_MAC(data, size, mac)                       \
+{                                                               \
+        zil_chain_t *zilc;                                      \
+        zilc = (zil_chain_t *)(data);                           \
+        mac[0] = BE_32(BF64_GET(zilc->zc_mac,  0, 32));         \
+        mac[1] = BE_32(BF64_GET(zilc->zc_mac, 32, 32));         \
+}
+
+#define ZC_SET_CRYPT_MAC(data, size, mac)                       \
+{                                                               \
+        zil_chain_t *zilc;                                      \
+        zilc = (zil_chain_t *)(data);                           \
+        BF64_SET(zilc->zc_mac,  0, 32, BE_32(mac[0]));          \
+        BF64_SET(zilc->zc_mac, 32, 32, BE_32(mac[1]));          \
+}
 
 #define	ZIL_MIN_BLKSZ	4096ULL
 #define	ZIL_MAX_BLKSZ	SPA_MAXBLOCKSIZE
@@ -435,7 +452,7 @@ typedef int zil_parse_blk_func_t(zilog_t *zilog, blkptr_t *bp, void *arg,
     uint64_t txg);
 typedef int zil_parse_lr_func_t(zilog_t *zilog, lr_t *lr, void *arg,
     uint64_t txg);
-typedef int zil_replay_func_t(void *, char *, boolean_t);
+typedef int (*const zil_replay_func_t)(void *, char *, boolean_t);
 typedef int zil_get_data_t(void *arg, lr_write_t *lr, char *dbuf, zio_t *zio);
 
 extern int zil_parse(zilog_t *zilog, zil_parse_blk_func_t *parse_blk_func,
@@ -451,9 +468,10 @@ extern zilog_t	*zil_open(objset_t *os, zil_get_data_t *get_data);
 extern void	zil_close(zilog_t *zilog);
 
 extern void	zil_replay(objset_t *os, void *arg,
-    zil_replay_func_t *replay_func[TX_MAX_TYPE]);
+    zil_replay_func_t replay_func[TX_MAX_TYPE]);
 extern boolean_t zil_replaying(zilog_t *zilog, dmu_tx_t *tx);
 extern void	zil_destroy(zilog_t *zilog, boolean_t keep_first);
+extern void	zil_destroy_sync(zilog_t *zilog, dmu_tx_t *tx);
 extern void	zil_rollback_destroy(zilog_t *zilog, dmu_tx_t *tx);
 
 extern itx_t	*zil_itx_create(uint64_t txtype, size_t lrsize);
@@ -471,12 +489,19 @@ extern void	zil_clean(zilog_t *zilog, uint64_t synced_txg);
 extern int	zil_suspend(zilog_t *zilog);
 extern void	zil_resume(zilog_t *zilog);
 
+extern void     zil_suspend_dmu_sync(zilog_t *zilog);
+extern void     zil_resume_dmu_sync(zilog_t *zilog);
+
 extern void	zil_add_block(zilog_t *zilog, const blkptr_t *bp);
 extern int	zil_bp_tree_add(zilog_t *zilog, const blkptr_t *bp);
 
 extern void	zil_set_sync(zilog_t *zilog, uint64_t syncval);
 
 extern void	zil_set_logbias(zilog_t *zilog, uint64_t slogval);
+
+extern int zil_set_crypto_data(char *src, size_t size,
+    void *dest, iovec_t **srciovp, iovec_t **dstiovp, size_t *cdlen,
+    boolean_t encrypting);
 
 extern int zil_replay_disable;
 

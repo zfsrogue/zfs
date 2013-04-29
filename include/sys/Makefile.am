@@ -1,4 +1,4 @@
-SUBDIRS = fm fs
+SUBDIRS = fm fs crypto
 
 COMMON_H = \
 	$(top_srcdir)/include/sys/arc.h \
@@ -6,6 +6,7 @@ COMMON_H = \
 	$(top_srcdir)/include/sys/avl_impl.h \
 	$(top_srcdir)/include/sys/bplist.h \
 	$(top_srcdir)/include/sys/bpobj.h \
+	$(top_srcdir)/include/sys/bptree.h \
 	$(top_srcdir)/include/sys/dbuf.h \
 	$(top_srcdir)/include/sys/ddt.h \
 	$(top_srcdir)/include/sys/dmu.h \
@@ -53,6 +54,7 @@ COMMON_H = \
 	$(top_srcdir)/include/sys/zap.h \
 	$(top_srcdir)/include/sys/zap_impl.h \
 	$(top_srcdir)/include/sys/zap_leaf.h \
+	$(top_srcdir)/include/sys/zfeature.h \
 	$(top_srcdir)/include/sys/zfs_acl.h \
 	$(top_srcdir)/include/sys/zfs_context.h \
 	$(top_srcdir)/include/sys/zfs_ctldir.h \
@@ -77,7 +79,10 @@ KERNEL_H = \
 	$(top_srcdir)/include/sys/zfs_ioctl.h \
 	$(top_srcdir)/include/sys/zfs_onexit.h \
 	${top_srcdir}/include/sys/zpl.h \
-	$(top_srcdir)/include/sys/zvol.h
+	$(top_srcdir)/include/sys/zvol.h \
+	$(top_srcdir)/include/sys/dsl_crypto.h \
+	$(top_srcdir)/include/sys/zcrypt.h \
+	$(top_srcdir)/include/sys/zio_crypt.h
 
 USER_H =
 
@@ -89,6 +94,6 @@ libzfs_HEADERS = $(COMMON_H) $(USER_H)
 endif
 
 if CONFIG_KERNEL
-kerneldir = /usr/src/zfs-$(ZFS_META_VERSION)-$(ZFS_META_RELEASE)/$(LINUX_VERSION)/sys
+kerneldir = /usr/src/zfs-$(VERSION)/include/sys
 kernel_HEADERS = $(COMMON_H) $(KERNEL_H)
 endif
